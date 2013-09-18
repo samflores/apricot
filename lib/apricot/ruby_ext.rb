@@ -30,6 +30,11 @@ class Array
     str << ']'
   end
 
+  def bytecode(g, quoted=false, macroexpand=true)
+    each {|e| e.bytecode(g, quoted) }
+    g.make_array size
+  end
+
   def apricot_call(idx)
     self[idx]
   end
@@ -98,6 +103,22 @@ class Hash
     str << '}'
   end
 
+  def bytecode(g, quoted=false, macroexpand=true)
+    # Create a new Hash
+    g.push_const :Hash
+    g.push size
+    g.send :new_from_literal, 1
+
+    # Add keys and values
+    each_pair do |key, value|
+      g.dup # the Hash
+      key.bytecode(g, quoted)
+      value.bytecode(g, quoted)
+      g.send :[]=, 2
+      g.pop # drop the return value of []=
+    end
+  end
+
   def apricot_call(key, default = nil)
     fetch(key, default)
   end
@@ -123,6 +144,16 @@ class Set
     str << '}'
   end
 
+  def bytecode(g, quoted=false, macroexpand=false)
+    g.push_const :Set
+    g.send :new, 0 # TODO: Inline this new?
+
+    each do |elem|
+      elem.bytecode(g, quoted)
+      g.send :add, 1
+    end
+  end
+
   def apricot_call(elem, default = nil)
     include?(elem) ? elem : default
   end
@@ -134,7 +165,35 @@ class Set
   end
 end
 
+module Onceable
+  # Some literals, such as regexps and rationals, should only be created the
+  # first time they are encountered. We push a literal nil here, and then
+  # overwrite the literal value with the created object if it is nil, i.e.
+  # the first time only. Subsequent encounters will use the previously
+  # created object. This idea was copied from Rubinius::AST::RegexLiteral.
+  #
+  # The passed block should take a generator and generate the bytecode to
+  # create the object the first time.
+  def once(g)
+    idx = g.add_literal(nil)
+    g.push_literal_at idx
+    g.dup
+    g.is_nil
+
+    lbl = g.new_label
+    g.gif lbl
+    g.pop
+
+    yield g
+
+    g.set_literal idx
+    lbl.set!
+  end
+end
+
 class Rational
+  include Onceable
+
   def apricot_inspect
     if @denominator == 1
       @numerator.to_s
@@ -143,12 +202,32 @@ class Rational
     end
   end
 
+  def bytecode(g, quoted=false, macroexpand=true)
+    once(g) do
+      g.push_self
+      g.push numerator
+      g.push denominator
+      g.send :Rational, 2, true
+    end
+  end
+
   alias_method :apricot_str, :apricot_inspect
 end
 
 class Regexp
+  include Onceable
+
   def apricot_inspect
     "#r#{inspect}"
+  end
+
+  def bytecode(g, quoted=false, macroexpand=true)
+    once(g) do
+      g.push_const :Regexp
+      g.push_literal source
+      g.push options
+      g.send :new, 2
+    end
   end
 
   alias_method :apricot_str, :apricot_inspect
@@ -163,6 +242,10 @@ class Symbol
     else
       ":#{str.inspect}"
     end
+  end
+
+  def bytecode(g, quoted=false, macroexpand=true)
+    g.push_literal self
   end
 
   def apricot_call(obj, default = nil)
@@ -257,5 +340,48 @@ class NilClass
 
   def rest
     Apricot::List::EMPTY_LIST
+  end
+end
+
+class String
+  def bytecode(g, quoted=false, macroexpand=true)
+    g.push_literal self
+    g.string_dup # Duplicate string to prevent mutating the literal
+  end
+end
+
+class Fixnum
+  def bytecode(g, quoted=false, macroexpand=true)
+    g.push self
+  end
+end
+
+class Float
+  def bytecode(g, quoted=false, macroexpand=true)
+    g.push_unique_literal self
+  end
+end
+
+class BigNum
+  def bytecode(g, quoted=false, macroexpand=true)
+    g.push_unique_literal self
+  end
+end
+
+class TrueClass
+  def bytecode(g, quoted=false, macroexpand=true)
+    g.push :true
+  end
+end
+
+class FalseClass
+  def bytecode(g, quoted=false, macroexpand=true)
+    g.push :false
+  end
+end
+
+class NilClass
+  def bytecode(g, quoted=false, macroexpand=true)
+    g.push :nil
   end
 end

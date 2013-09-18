@@ -12,32 +12,43 @@ module Apricot
     private_class_method :new
 
     def initialize(name)
-      @name = name
+      @name = @unqualified_name = name
+    end
 
-      if @name =~ /\A(?:[A-Z]\w*::)*[A-Z]\w*\z/
-        @constant = true
-        @const_names = @name.to_s.split('::').map(&:to_sym)
-      elsif @name =~ /\A(.+?)\/(.+)\z/
-        @qualified = true
-        qualifier_id = Identifier.intern($1)
-        raise 'Qualifier in qualified identifier must be a constant' unless qualifier_id.constant?
-
-        @qualifier = qualifier_id.const_names.reduce(Object) do |mod, name|
-          mod.const_get(name)
-        end
-
-        @unqualified_name = $2.to_sym
+    def bytecode(g, quoted=false, macroexpand=true)
+      if quoted
+        quoted_bytecode(g)
       else
-        @unqualified_name = name
+        if constant?
+          g.push_const const_names.first
+          const_names.drop(1).each {|n| g.find_const n }
+        elsif self?
+          g.push_self
+        elsif qualified?
+          QualifiedReference.new(unqualified_name, qualifier).bytecode(g)
+        else
+          g.scope.find_var(name).bytecode(g)
+        end
       end
     end
 
+    def quoted_bytecode(g)
+      g.push_const :Apricot
+      g.find_const :Identifier
+      g.push_literal name
+      g.send :intern, 1
+    end
+
+    def self?
+      self == Identifier.intern(:self)
+    end
+
     def qualified?
-      @qualified
+      qualifier && @unqualified_name != @name
     end
 
     def constant?
-      @constant
+      !const_names.empty?
     end
 
     # Does the identifier reference a fn on a namespace?
@@ -57,11 +68,26 @@ module Apricot
     end
 
     def qualifier
+      return @qualifier if @qualifier
+      if @name =~ /\A(.+?)\/(.+)\z/
+        qualifier_id = Identifier.intern($1)
+        raise 'Qualifier in qualified identifier must be a constant' unless qualifier_id.constant?
+
+        @qualifier = qualifier_id.const_names.reduce(Object) do |mod, name|
+          mod.const_get(name)
+        end
+
+        @unqualified_name = $2.to_sym
+      end
       @qualifier ||= Apricot.current_namespace
     end
 
     def const_names
-      raise "#{@name} is not a constant" unless constant?
+      return @const_names if @const_names
+      @const_names = []
+      if @name =~ /\A(?:[A-Z]\w*::)*[A-Z]\w*\z/
+        @const_names = @name.to_s.split('::').map(&:to_sym)
+      end
       @const_names
     end
 
