@@ -34,10 +34,11 @@ class Array
     # FIXME: should not convert to array
     list = values.to_a.dup
     enum = self.to_enum
+    amp = Apricot::Identifier.intern(:'&')
     loop do
       id = enum.next
       id, value = case id
-              when Identifier.intern(:'&')
+              when amp
                 [enum.next, list.empty? ? nil : list]
               when :as
                 [enum.next, values]
@@ -46,6 +47,8 @@ class Array
               end
       id.bind(g, value, scope)
     end
+  rescue NameError => e
+    puts e
   rescue StopIteration
   end
 
