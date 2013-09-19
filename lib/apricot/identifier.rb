@@ -15,6 +15,12 @@ module Apricot
       @name = @unqualified_name = name
     end
 
+    def bind(g, value, scope)
+      Compiler.bytecode(g, value)
+      g.set_local scope.new_local(self)
+      g.pop
+    end
+
     def bytecode(g, quoted=false, macroexpand=true)
       if quoted
         quoted_bytecode(g)

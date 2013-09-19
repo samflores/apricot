@@ -33,11 +33,8 @@ module Apricot
     g.scopes << scope
 
     bindings.each_slice(2) do |id, value|
-      g.compile_error "Binding targets in #{type} must be identifiers" unless id.is_a? Identifier
-
-      Compiler.bytecode(g, value)
-      g.set_local scope.new_local(id)
-      g.pop
+      g.compile_error "Invalid bind targets in #{type}" unless id.respond_to?(:bind)
+      id.bind(g, value, scope)
     end
 
     if type == :loop

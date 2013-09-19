@@ -30,6 +30,25 @@ class Array
     str << ']'
   end
 
+  def bind(g, values, scope)
+    # FIXME: should not convert to array
+    list = values.to_a.dup
+    enum = self.to_enum
+    loop do
+      id = enum.next
+      id, value = case id
+              when Identifier.intern(:'&')
+                [enum.next, list.empty? ? nil : list]
+              when :as
+                [enum.next, values]
+              else
+                [id, list.delete_at(0)]
+              end
+      id.bind(g, value, scope)
+    end
+  rescue StopIteration
+  end
+
   def bytecode(g, quoted=false, macroexpand=true)
     each {|e| e.bytecode(g, quoted) }
     g.make_array size
