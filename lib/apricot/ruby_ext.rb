@@ -47,8 +47,6 @@ class Array
               end
       id.bind(g, value, scope)
     end
-  rescue NameError => e
-    puts e
   rescue StopIteration
   end
 
@@ -123,6 +121,26 @@ class Hash
 
     str.shorten!(2)
     str << '}'
+  end
+
+  def bind(g, values, scope)
+    hash = values.dup
+    delete(:keys).each do |key|
+      self[key] = key.name.to_sym
+    end
+    defaults = delete(:or) || {}
+    enum = self.to_enum
+    loop do
+      id, key = enum.next
+      id, key, value = case id
+                       when :as
+                         [key, nil, values]
+                       else
+                         [id, key, hash.delete(key)]
+                       end
+      id.bind(g, value || defaults[id], scope)
+    end
+  rescue StopIteration
   end
 
   def bytecode(g, quoted=false, macroexpand=true)
